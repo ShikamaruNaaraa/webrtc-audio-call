@@ -110,6 +110,7 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
 
   bool connected = false;
   bool connecting = false;
+  bool incomingCallVisible = false;
   final List<RTCIceCandidate> pendingCandidates = [];
 
   late AnimationController _pulseController;
@@ -176,6 +177,9 @@ class _HomePageState extends State<HomePage> with TickerProviderStateMixin {
             break;
           case "candidate":
             await handleCandidate(data);
+            break;
+          case "hangup":
+            await handleHangup();
             break;
           case "user_not_found":
             _showSnack("User is offline");
@@ -253,6 +257,18 @@ peerConnection!.onTrack = (event) {
   if (state == RTCPeerConnectionState.RTCPeerConnectionStateConnected) {
     _openCallScreen();
      }
+
+    if (state ==
+          RTCPeerConnectionState
+              .RTCPeerConnectionStateDisconnected ||
+      state ==
+          RTCPeerConnectionState
+              .RTCPeerConnectionStateFailed ||
+      state ==
+          RTCPeerConnectionState
+              .RTCPeerConnectionStateClosed) {
+    handleHangup();
+              }
   };
 }
 
@@ -296,11 +312,13 @@ peerConnection!.onTrack = (event) {
     );
 
     if (!mounted) return;
+    incomingCallVisible = true;
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => IncomingCallScreen(
           callerId: sender,
           onAccept: () async {
+            incomingCallVisible = false;
             Navigator.of(context).pop();
             final answer = await peerConnection!.createAnswer();
             await peerConnection!.setLocalDescription(answer);
@@ -319,8 +337,16 @@ peerConnection!.onTrack = (event) {
   );
           },
           onDecline: () {
-            Navigator.of(context).pop();
-          },
+            incomingCallVisible = false;
+            sendMessage(
+              sender,
+              {
+                "type": "hangup",
+            },
+        );
+
+  Navigator.of(context).pop();
+},
         ),
       ),
     );
@@ -352,11 +378,36 @@ peerConnection!.onTrack = (event) {
      print("CANDIDATE ADDED");
   }
 
-  Future<void> _hangup() async {
-    await peerConnection?.close();
-    peerConnection = null;
-    await initWebRTC();
+  Future<void> handleHangup() async {
+  print("REMOTE HANGUP");
+
+  incomingCallVisible = false;
+
+  _showSnack("Call ended");
+
+  await peerConnection?.close();
+  peerConnection = null;
+
+  if (mounted) {
+    Navigator.of(context).popUntil((route) => route.isFirst);
   }
+  
+  await initWebRTC();
+}
+
+  Future<void> _hangup() async {
+  if (currentPeerId != null) {
+    sendMessage(
+      currentPeerId!,
+      {
+        "type": "hangup",
+      },
+    );
+  }
+  await peerConnection?.close();
+  peerConnection = null;
+  await initWebRTC();
+}
 
   void _showSnack(String msg) {
     ScaffoldMessenger.of(context).showSnackBar(
